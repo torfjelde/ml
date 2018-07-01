@@ -1,9 +1,12 @@
 from tqdm import tqdm
 
-from .. import np, log
+from .. import np
 from ..functions import sigmoid
 
 import abc
+
+import logging
+_log = logging.getLogger("ml")
 
 
 class GenericRBM(metaclass=abc.ABCMeta):
@@ -75,11 +78,11 @@ class GenericRBM(metaclass=abc.ABCMeta):
             # compute train & test negative log-likelihood
             nll_train = float(np.mean(self.free_energy(train_data)))
             loglikelihood_train.append(nll_train)
-            log.info(f"[{epoch} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
+            _log.info(f"[{epoch} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
 
             if test_data is not None:
                 nll = float(np.mean(self.free_energy(test_data)))
-                log.info(f"[{epoch} / {num_epochs}] NLL (test):  {nll:>20.5f}")
+                _log.info(f"[{epoch} / {num_epochs}] NLL (test):  {nll:>20.5f}")
                 loglikelihood.append(nll)
 
             # iterate through dataset in batches
@@ -102,11 +105,11 @@ class GenericRBM(metaclass=abc.ABCMeta):
         # compute train & test negative log-likelihood of final batch
         nll_train = float(np.mean(self.free_energy(train_data)))
         loglikelihood_train.append(nll_train)
-        log.info(f"[{epoch} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
+        _log.info(f"[{epoch} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
 
         if test_data is not None:
             nll = float(np.mean(self.free_energy(test_data)))
-            log.info(f"[{epoch} / {num_epochs}] NLL (test):  {nll:>20.5f}")
+            _log.info(f"[{epoch} / {num_epochs}] NLL (test):  {nll:>20.5f}")
             loglikelihood.append(nll)
 
         return loglikelihood_train, loglikelihood
