@@ -11,7 +11,12 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['Click>=6.0', ]
+requirements = ['Click>=6.0',
+                'numpy>=1.14.0',
+                'scikit-learn>=0.19.1',
+                'scipy>=1.1.0',
+                'matplotlib>=2.2.2',
+                'tqdm>=4.23.4',]
 
 setup_requirements = ['pytest-runner', ]
 
@@ -44,7 +49,7 @@ setup(
     include_package_data=True,
     keywords='ml',
     name='ml',
-    packages=find_packages(include=['ml']),
+    packages=find_packages(),
     setup_requires=setup_requirements,
     test_suite='tests',
     tests_require=test_requirements,
