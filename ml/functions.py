@@ -1,0 +1,15 @@
+from . import np
+
+
+def sigmoid(z):
+    # clip the values due to possibility of overflow
+    return 1.0 / (1.0 + np.exp(-np.maximum(np.minimum(z, 30), -30)))
+
+
+def flip(x, p):
+    "Assumes `x` is an array of 0s and 1s, and flips these based on probabilities `p`."
+    x = x.copy()
+    mask = np.random.random(size=x.shape) < p
+    flipped = (~(x.astype(np.bool))).astype(np.int)
+    x[mask] = flipped[mask]
+    return x
