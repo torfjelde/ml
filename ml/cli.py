@@ -84,7 +84,7 @@ def train_rbm(dataset, dataset_path,
     from .viz import plot_reconstructions
     fig, axes = plot_reconstructions(model, X_test, noise=noise)
 
-    plt.title(f"RBM with {hidden_size} hidden units training for {epochs}")
+    fig.suptitle(f"RBM with {hidden_size} hidden units training for {epochs}")
 
     log.info(f"Saving to {output}")
     plt.savefig(output)
