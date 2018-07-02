@@ -1,11 +1,11 @@
+import abc
+import logging
+
 from tqdm import tqdm
 
 from .. import np
-from ..functions import sigmoid
+from ..functions import sigmoid, dot_batch
 
-import abc
-
-import logging
 _log = logging.getLogger("ml")
 
 
@@ -172,7 +172,7 @@ class BatchBernoulliRBM(GenericRBM):
     def energy(self, v, h):
         return - (np.matmul(v, self.v_bias) +
                   np.matmul(h, self.h_bias) +
-                  np.matmul(h, np.matmul(v, self.W).T))
+                  dot_batch(h, np.matmul(v, self.W)))
 
     def proba_visible(self, h):
         "Computes p(v | h)."
@@ -210,11 +210,11 @@ class BatchBernoulliRBM(GenericRBM):
         z_k = np.matmul(y, x)
         delta_W = z_0 - z_k
 
+        # average across batch take the negative
         delta_v_bias = - np.mean(delta_v_bias, axis=0)
         delta_h_bias = - np.mean(delta_h_bias, axis=0)
         delta_W = - np.mean(delta_W, axis=0)
 
-        # make negatives since we're performing gradient DEscent
         return delta_v_bias, delta_h_bias, delta_W
 
 

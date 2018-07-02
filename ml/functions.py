@@ -13,3 +13,11 @@ def flip(x, p):
     flipped = (~(x.astype(np.bool))).astype(np.int)
     x[mask] = flipped[mask]
     return x
+
+
+def dot_batch(x, y):
+    """Computes dot-product between batch of two vectors.
+    `x` and `y` assumed to be of shape `(batch_size, vector_size)`.
+
+    """
+    return np.sum(x * y, axis=1)
