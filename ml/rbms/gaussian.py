@@ -236,22 +236,46 @@ visible/hidden units.
         # sum across batch to obtain log of joint-likelihood
         return np.sum(hidden + visible)
 
-    def contrastive_divergence(self, v_0, k=1, metropolis=True):
+    def contrastive_divergence(self, v_0, k=1, metropolis=False):
+        """Contrastive Divergence.
+
+        Parameters
+        ----------
+        self: type
+            description
+        v_0: array-like
+            Visible state to initialize the chain from.
+        k: int
+            Number of steps to use in CD-k.
+        metropolis: bool, [default=True]
+            If `True`, will use the Metropolis-Hastings Gibbs Block sampling method which
+            first samples a new state, then accepts or rejects the state with some probability.
+            Otherwise, samples will be drawn from the probability distribution
+            of the model and accepted no matter what.
+
+        Returns
+        -------
+        h_0, h, v_0, v: arrays
+            `h_0` and `v_0` are the initial states for the hidden and visible units, respectively.
+            `h` and `v` are the final states for the hidden and visible units, respectively.
+        """
         v = v_0
         h_0 = self.sample_hidden(v)  # don't have `h` yet; random sample
-        # v = self.gibbs_sample_visible(h_0, v)
-        # h = self.gibbs_sample_hidden(v, h_0)
-        v = self.sample_visible(h_0)
-        h = self.sample_hidden(v)
+        if metropolis:
+            v = self.gibbs_sample_visible(h_0, v)
+            h = self.gibbs_sample_hidden(v, h_0)
+        else:
+            v = self.sample_visible(h_0)
+            h = self.sample_hidden(v)
 
         if k > 1:
             for t in range(k):
-                # v = self.gibbs_sample_visible(h, v)
-                # h = self.gibbs_sample_hidden(v, h)
-                v = self.sample_visible(h)
-                h = self.sample_hidden(v)
-
-        # assert np.any(v_0 != v)
+                if metropolis:
+                    v = self.gibbs_sample_visible(h, v)
+                    h = self.gibbs_sample_hidden(v, h)
+                else:
+                    v = self.sample_visible(h)
+                    h = self.sample_hidden(v)
 
         return h_0, h, v_0, v
 
@@ -407,7 +431,7 @@ class GaussianRBM(SimpleRBM):
     """Restricted Boltzmann Machine with Gaussian visible units and Bernoulli hidden units.
 
     """
-    def __init__(self, num_visible, num_hidden, estimate_visible_sigma=True):
+    def __init__(self, num_visible, num_hidden, estimate_visible_sigma=False):
         super(GaussianRBM, self).__init__(
             num_visible, num_hidden,
             visible_type='gaussian',
