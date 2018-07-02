@@ -57,7 +57,7 @@ def train_rbm(dataset, dataset_path,
         initialize_gpu()
 
     from .rbms.rbm import BernoulliRBM, BatchBernoulliRBM
-    from .rbms.gaussian import GaussianRBM
+    from .rbms.gaussian import GaussianRBM, SimpleRBM
     from . import datasets
 
     # load data
@@ -66,8 +66,9 @@ def train_rbm(dataset, dataset_path,
     input_size = X_train.shape[1]
 
     # MNIST takes on values in [0, 255], so we clip to [0, 1]
-    # X_train = X_train.clip(0, 1)
-    # X_test = X_test.clip(0, 1)
+    if rbm_type == "bernoulli":
+        X_train = X_train.clip(0, 1)
+        X_test = X_test.clip(0, 1)
     # eps = np.finfo(np.float32).eps
     # X_train = X_train / np.linalg.norm(X_train + eps, axis=0)
     # X_test = X_test / np.linalg.norm(X_test + eps, axis=0)
@@ -78,7 +79,10 @@ def train_rbm(dataset, dataset_path,
     if rbm_type == "gaussian":
         model = GaussianRBM(input_size, hidden_size)
     elif gpu:
-        model = BatchBernoulliRBM(input_size, hidden_size)
+        # model = BatchBernoulliRBM(input_size, hidden_size)
+        model = SimpleRBM(input_size, hidden_size,
+                          visible_type='bernoulli',
+                          hidden_type='bernoulli')
     else:
         model = BernoulliRBM(input_size, hidden_size)
 

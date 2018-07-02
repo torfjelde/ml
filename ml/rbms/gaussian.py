@@ -22,7 +22,7 @@ def bernoulli_from_probas(probas):
     return (probas > rands).astype(int)
 
 
-def log_sum_exp(x, alpha):    
+def log_sum_exp(x, alpha):
     return alpha + np.exp(x - alpha).sum().log()
 
 
@@ -136,42 +136,6 @@ visible/hidden units.
 
         return h
 
-    def gibbs_sample_visible(self, h, v):
-        p_v = self.proba_visible(h, v=v)
-
-        # proposal
-        v_new = self.sample_visible(h)
-        p_v_new = self.proba_visible(h, v=v_new)
-
-        # log-likelihood
-        ll = - self.free_energy(v)
-        ll_new = - self.free_energy(v_new)
-
-        # accept / reject
-        rands = np.random.random(size=p_v_new.shape)
-        log_ratio = (ll_new - ll) + np.log(p_v / p_v_new)
-        acceptance_mask = rands < np.exp(log_ratio)
-
-        return (v_new * acceptance_mask) + (v * (~acceptance_mask))
-
-    def gibbs_sample_hidden(self, v, h):
-        p_h = self.proba_hidden(v, h=h)
-
-        # proposal
-        h_new = self.sample_hidden(v)
-        p_h_new = self.proba_hidden(v, h=h_new)
-
-        # log-likelihood
-        ll = - self.free_energy_hidden(h)
-        ll_new = - self.free_energy_hidden(h_new)
-
-        # accept / reject
-        rands = np.random.random(size=p_h_new.shape)
-        log_ratio = (ll_new - ll) + np.log(p_h / p_h_new)
-        acceptance_mask = rands < np.exp(log_ratio)
-
-        return (h_new * acceptance_mask) + (h * (~acceptance_mask))
-
     def proba_visible(self, h, v=None):
         mean = self.mean_visible(h)
         if self.visible_type == UnitType.BERNOULLI:
@@ -201,7 +165,6 @@ visible/hidden units.
         return p
 
     def free_energy(self, v):
-        # return 0.0
         if self.hidden_type == UnitType.BERNOULLI:
             hidden = self.h_bias + np.matmul((v / self.v_sigma), self.W)
             hidden = - np.sum(np.log(1.0 + np.exp(np.clip(hidden, -30, 30))), axis=1)
