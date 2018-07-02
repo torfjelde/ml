@@ -199,7 +199,7 @@ visible/hidden units.
         # sum across batch to obtain log of joint-likelihood
         return np.sum(hidden + visible)
 
-    def contrastive_divergence(self, v_0, k=1, metropolis=False):
+    def contrastive_divergence(self, v_0, k=1):
         """Contrastive Divergence.
 
         Parameters
@@ -222,25 +222,16 @@ visible/hidden units.
             `h_0` and `v_0` are the initial states for the hidden and visible units, respectively.
             `h` and `v` are the final states for the hidden and visible units, respectively.
         """
+        h_0 = self.sample_hidden(v_0)
+
         v = v_0
-        h_0 = self.sample_hidden(v)  # don't have `h` yet; random sample
-        if metropolis:
-            v = self.gibbs_sample_visible(h_0, v)
-            h = self.gibbs_sample_hidden(v, h_0)
-        else:
-            v = self.sample_visible(h_0)
+        h = h_0
+
+        for t in range(k):
+            v = self.sample_visible(h)
             h = self.sample_hidden(v)
 
-        if k > 1:
-            for t in range(k):
-                if metropolis:
-                    v = self.gibbs_sample_visible(h, v)
-                    h = self.gibbs_sample_hidden(v, h)
-                else:
-                    v = self.sample_visible(h)
-                    h = self.sample_hidden(v)
-
-        return h_0, h, v_0, v
+        return v_0, h_0, v, h
 
     def _update(self, grad, lr=0.1):
         for i in range(len(self.variables)):
@@ -273,7 +264,7 @@ visible/hidden units.
         return probs
 
     def grad(self, v, k=1):
-        h_0, h_k, v_0, v_k = self.contrastive_divergence(v, k=k)
+        v_0, h_0, v_k, h_k = self.contrastive_divergence(v, k=k)
         # all expressions below using `v` or `mean_h` will contain
         # AT LEAST one factor of `1 / v_sigma` and `1 / h_sigma`, respectively
         # so we include those right away
