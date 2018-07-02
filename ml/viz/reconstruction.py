@@ -25,7 +25,7 @@ def plot_reconstructions(rbm, data, noise=0.0):
             v_0 = data[np.random.randint(len(data))]
 
             # introduce noise
-            v = flip(v_0, noise)
+            v = flip(v_0, noise, max=np.max(v_0))
             probs = rbm.reconstruct(v, num_samples=1000)
 
             # in case we've substituted with `cupy`
