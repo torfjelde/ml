@@ -108,7 +108,7 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             v = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
-            v = np.random.normal(loc=mean, scale=self.v_sigma ** 2)
+            v = np.random.normal(loc=mean, scale=self.v_sigma ** 2, size=mean.shape)
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
@@ -120,7 +120,7 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             h = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
-            h = np.random.normal(loc=mean, scale=self.h_sigma ** 2)
+            h = np.random.normal(loc=mean, scale=(self.h_sigma ** 2), size=(mean.shape))
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
