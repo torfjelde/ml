@@ -32,7 +32,8 @@ visible/hidden units.
 
     """
     def __init__(self, num_visible, num_hidden,
-                 visible_type='bernoulli', hidden_type='bernoulli'):
+                 visible_type='bernoulli', hidden_type='bernoulli',
+                 estimate_visible_sigma=False, estimate_hidden_sigma=False):
         super(SimpleRBM, self).__init__()
         self.num_visible = num_visible
         self.num_hidden = num_hidden
@@ -40,10 +41,19 @@ visible/hidden units.
         self.visible_type = UnitType.GAUSSIAN if visible_type == 'gaussian' else UnitType.BERNOULLI
         self.hidden_type = UnitType.GAUSSIAN if hidden_type == 'gaussian' else UnitType.BERNOULLI
 
+        self.estimate_visible_sigma = estimate_visible_sigma
+        self.estimate_hidden_sigma = estimate_hidden_sigma
+
         self.v_bias, self.h_bias, self.v_sigma, self.h_sigma, self.W = self.initialize(
             num_visible,
             num_hidden
         )
+
+        self._variables = [self.v_bias, self.h_bias, self.W]
+        if self.estimate_visible_sigma:
+            self._variables.append(self.v_sigma)
+        if self.estimate_hidden_sigma:
+            self._variables.append(self.h_sigma)
 
     @property
     def variables(self):
@@ -397,16 +407,11 @@ class GaussianRBM(SimpleRBM):
     """Restricted Boltzmann Machine with Gaussian visible units and Bernoulli hidden units.
 
     """
-    def __init__(self, num_visible, num_hidden):
+    def __init__(self, num_visible, num_hidden, estimate_visible_sigma=True):
         super(GaussianRBM, self).__init__(
             num_visible, num_hidden,
             visible_type='gaussian',
-            hidden_type='bernoulli'
+            hidden_type='bernoulli',
+            estimate_visible_sigma=estimate_visible_sigma,
+            estimate_hidden_sigma=False
         )
-
-        self.estimate_visible_sigma = True
-        self.estimate_hidden_sigma = False
-
-        # don't include `h_sigma` as a variable since we're using Bernoulli hiddens
-        self._variables = [self.v_bias, self.h_bias, self.W, self.v_sigma]
-        self._variables = [self.v_bias, self.h_bias, self.W]
