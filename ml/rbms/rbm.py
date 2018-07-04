@@ -66,7 +66,8 @@ class GenericRBM(metaclass=abc.ABCMeta):
 
     def fit(self, train_data, k=1, learning_rate=0.01,
             num_epochs=5, batch_size=64,
-            test_data=None):
+            test_data=None,
+            show_progress=False):
         num_samples = train_data.shape[0]
         indices = np.arange(num_samples)
         np.random.shuffle(indices)
@@ -86,7 +87,8 @@ class GenericRBM(metaclass=abc.ABCMeta):
                 loglikelihood.append(nll)
 
             # iterate through dataset in batches
-            bar = tqdm(total=num_samples)
+            if show_progress:
+                bar = tqdm(total=num_samples)
             for start in range(0, num_samples, batch_size):
                 # ensure we don't go out-of-bounds
                 end = min(start + batch_size, num_samples)
@@ -95,9 +97,11 @@ class GenericRBM(metaclass=abc.ABCMeta):
                 self.step(train_data[start: end], k=k, lr=learning_rate)
 
                 # update progress
-                bar.update(end - start)
+                if show_progress:
+                    bar.update(end - start)
 
-            bar.close()
+            if show_progress:
+                bar.close()
 
             # shuffle indices for next epoch
             np.random.shuffle(indices)
@@ -128,11 +132,11 @@ class GenericRBM(metaclass=abc.ABCMeta):
         return self._variables
 
     @abc.abstractmethod
-    def proba_visible(self, h):
+    def proba_visible(self, h, v=None):
         return NotImplemented
 
     @abc.abstractmethod
-    def proba_hidden(self, v):
+    def proba_hidden(self, v, h=None):
         return NotImplemented
 
     @abc.abstractmethod
@@ -174,11 +178,11 @@ class BatchBernoulliRBM(GenericRBM):
                   np.matmul(h, self.h_bias) +
                   dot_batch(h, np.matmul(v, self.W)))
 
-    def proba_visible(self, h):
+    def proba_visible(self, h, v=None):
         "Computes p(v | h)."
         return sigmoid(self.v_bias + np.matmul(h, self.W.T))
 
-    def proba_hidden(self, v):
+    def proba_hidden(self, v, h=None):
         "Computes p(h | h)."
         return sigmoid(self.h_bias + np.matmul(v, self.W))
 
@@ -190,7 +194,7 @@ class BatchBernoulliRBM(GenericRBM):
             v = v.reshape(1, -1)
         visible = np.matmul(v, self.v_bias)
         hidden = self.h_bias + np.matmul(v, self.W)
-        return - (visible + np.sum(np.log(1 + np.exp(hidden)), axis=1))
+        return np.sum(- (visible + np.sum(np.log(1 + np.exp(hidden)), axis=1)))
 
     def grad(self, v, k=1):
         "Estimates the gradient of the negative log-likelihood using CD-k."
@@ -248,11 +252,11 @@ class BernoulliRBM(GenericRBM):
                   + np.dot(self.h_bias, h)
                   + np.dot(v, np.dot(self.W, h)))
 
-    def proba_visible(self, h):
+    def proba_visible(self, h, v=None):
         "Computes p(v | h)."
         return sigmoid(self.v_bias + np.dot(self.W, h))
 
-    def proba_hidden(self, v):
+    def proba_hidden(self, v, h=None):
         "Computes p(h | h)."
         return sigmoid(self.h_bias + np.dot(self.W.T, v))
 
@@ -266,7 +270,7 @@ class BernoulliRBM(GenericRBM):
                 visible = np.dot(self.v_bias, v_0)
                 hidden = self.h_bias + np.dot(self.W.T, v_0)
                 res.append(- (visible + np.sum(np.log(1 + np.exp(hidden)))))
-            return res
+            return np.sum(res)
         else:
             visible = np.dot(self.v_bias, v)
             hidden = self.h_bias + np.dot(self.W.T, v)

@@ -38,8 +38,8 @@ visible/hidden units.
         self.num_visible = num_visible
         self.num_hidden = num_hidden
 
-        self.visible_type = UnitType.GAUSSIAN if visible_type == 'gaussian' else UnitType.BERNOULLI
-        self.hidden_type = UnitType.GAUSSIAN if hidden_type == 'gaussian' else UnitType.BERNOULLI
+        self.visible_type = getattr(UnitType, visible_type.upper())
+        self.hidden_type = getattr(UnitType, hidden_type.upper())
 
         self.estimate_visible_sigma = estimate_visible_sigma
         self.estimate_hidden_sigma = estimate_hidden_sigma
@@ -78,14 +78,16 @@ visible/hidden units.
         if self.visible_type == UnitType.BERNOULLI:
             visible = np.matmul(v, self.v_bias)
         elif self.visible_type == UnitType.GAUSSIAN:
-            visible = ((v - self.v_bias) ** 2) / (self.v_sigma ** 2 + np.finfo(np.float32).eps)
+            visible = ((v - self.v_bias) ** 2) / (self.v_sigma ** 2
+                                                  + np.finfo(np.float32).eps)
             visible = 0.5 * np.sum(visible, axis=1)
 
         # term only dependent on hidden
         if self.hidden_type == UnitType.BERNOULLI:
             hidden = np.matmul(h, self.h_bias)
         elif self.hidden_type == UnitType.GAUSSIAN:
-            hidden = ((h - self.h_bias) ** 2) / (self.h_sigma ** 2 + np.finfo(np.float32).eps)
+            hidden = ((h - self.h_bias) ** 2) / (self.h_sigma ** 2
+                                                 + np.finfo(np.float32).eps)
             hidden = 0.5 * np.sum(hidden, axis=1)
 
         # "covariance" term
@@ -98,7 +100,8 @@ visible/hidden units.
 
     def mean_visible(self, h):
         "Computes conditional expectation E[v | h]."
-        mean = self.v_bias + self.v_sigma * np.matmul(h / self.h_sigma, self.W.T)
+        mean = self.v_bias + (self.v_sigma *
+                              np.matmul(h / self.h_sigma, self.W.T))
         if self.visible_type == UnitType.BERNOULLI:
             return sigmoid(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
@@ -118,7 +121,9 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             v = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
-            v = np.random.normal(loc=mean, scale=self.v_sigma ** 2, size=mean.shape)
+            v = np.random.normal(loc=mean,
+                                 scale=self.v_sigma ** 2,
+                                 size=mean.shape)
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
@@ -130,7 +135,9 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             h = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
-            h = np.random.normal(loc=mean, scale=(self.h_sigma ** 2), size=(mean.shape))
+            h = np.random.normal(loc=mean,
+                                 scale=(self.h_sigma ** 2),
+                                 size=(mean.shape))
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
@@ -142,7 +149,8 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             p = mean
         elif self.visible_type == UnitType.GAUSSIAN:
-            z = np.clip((v - mean) ** 2 / (2.0 * self.v_sigma ** 2), -30.0, 30.0)
+            z = np.clip((v - mean) ** 2 / (2.0 * self.v_sigma ** 2),
+                        -30.0, 30.0)
             p = (np.exp(z) / (np.sqrt(2 * np.pi) * self.v_sigma
                               + np.finfo(np.float32).eps))
         else:
@@ -156,7 +164,8 @@ visible/hidden units.
             # E[v | h] = p(v | h) for Bernoulli
             p = mean
         elif self.hidden_type == UnitType.GAUSSIAN:
-            z = np.clip((h - mean) ** 2 / (2.0 * self.h_sigma ** 2), -30.0, 30.0)
+            z = np.clip((h - mean) ** 2 / (2.0 * self.h_sigma ** 2),
+                        -30.0, 30.0)
             p = (np.exp(z) / (np.sqrt(2 * np.pi) * self.h_sigma
                               + np.finfo(np.float32).eps))
         else:
@@ -167,8 +176,9 @@ visible/hidden units.
     def free_energy(self, v):
         if self.hidden_type == UnitType.BERNOULLI:
             hidden = self.h_bias + np.matmul((v / self.v_sigma), self.W)
-            hidden = - np.sum(np.log(1.0 + np.exp(np.clip(hidden, -30, 30))), axis=1)
-        elif self.visible_type == UnitType.GAUSSIAN:
+            hidden = - np.sum(np.log(1.0 + np.exp(np.clip(hidden, -30, 30))),
+                              axis=1)
+        elif self.hidden_type == UnitType.GAUSSIAN:
             # TODO: Implement
             # Have the formulas, but gotta make sure yo!
             raise NotImplementedError()
@@ -176,25 +186,13 @@ visible/hidden units.
         if self.visible_type == UnitType.BERNOULLI:
             visible = - np.matmul(v, self.v_bias)
         elif self.visible_type == UnitType.GAUSSIAN:
-            visible = 0.5 * np.sum(((v - self.v_bias) ** 2)
-                                   / (self.v_sigma ** 2 + np.finfo(np.float32).eps), axis=1)
+            visible = 0.5 * np.sum(
+                ((v - self.v_bias) ** 2)
+                / (self.v_sigma ** 2 + np.finfo(np.float32).eps),
+                axis=1
+            )
         else:
             raise ValueError(f"unknown type {self.visible_type}")
-
-        # sum across batch to obtain log of joint-likelihood
-        return np.sum(hidden + visible)
-
-    def free_energy_hidden(self, h):
-        # FIXME: computation of visible is wrong
-        raise NotImplementedError("computation of visible is wrong; implement pls")
-        visible = - np.sum(self.mean_visible(h), axis=1)
-        if self.hidden_type == UnitType.BERNOULLI:
-            hidden = - np.matmul(h, self.h_bias)
-        elif self.hidden_type == UnitType.GAUSSIAN:
-            hidden = 0.5 * np.sum(((h - self.h_bias) ** 2)
-                                  / (self.h_sigma ** 2 + np.finfo(np.float32).eps), axis=1)
-        else:
-            raise ValueError(f"unknown type {self.hidden_type}")
 
         # sum across batch to obtain log of joint-likelihood
         return np.sum(hidden + visible)
@@ -210,17 +208,14 @@ visible/hidden units.
             Visible state to initialize the chain from.
         k: int
             Number of steps to use in CD-k.
-        metropolis: bool, [default=True]
-            If `True`, will use the Metropolis-Hastings Gibbs Block sampling method which
-            first samples a new state, then accepts or rejects the state with some probability.
-            Otherwise, samples will be drawn from the probability distribution
-            of the model and accepted no matter what.
 
         Returns
         -------
         h_0, h, v_0, v: arrays
-            `h_0` and `v_0` are the initial states for the hidden and visible units, respectively.
-            `h` and `v` are the final states for the hidden and visible units, respectively.
+            `h_0` and `v_0` are the initial states for the hidden and
+            visible units, respectively.
+            `h` and `v` are the final states for the hidden and
+            visible units, respectively.
         """
         h_0 = self.sample_hidden(v_0)
 
@@ -299,8 +294,9 @@ visible/hidden units.
         grads = [delta_v_bias, delta_h_bias, delta_W]
 
         # variances
-        if self.visible_type == UnitType.GAUSSIAN and self.estimate_visible_sigma:
-            # in this case `GaussianRBM`, where only the VISIBLE units are Gaussian,
+        if self.visible_type == UnitType.GAUSSIAN \
+           and self.estimate_visible_sigma:
+            # in `GaussianRBM`, where only VISIBLE units Gaussian,
             # we only compute `v_sigma`
             # (((v_0 - b)^2 / (v_sigma^2)) - (v / (v_sigma)) \sum_{\mu} E[h_{\mu} | v] / sigma_{\mu}) / v_sigma
             delta_v_sigma_data = (((v_0 - (self.v_bias / self.v_sigma)) ** 2)
@@ -313,9 +309,11 @@ visible/hidden units.
 
             grads.append(delta_v_sigma)
 
-        if self.visible_type == UnitType.GAUSSIAN and self.estimate_hidden_sigma:
+        if self.visible_type == UnitType.GAUSSIAN \
+           and self.estimate_hidden_sigma:
             # TODO: Implement
-            raise NotImplementedError("gradients for gaussian hidden units not yet implemented")
+            raise NotImplementedError("gradients for gaussian hidden"
+                                      " units not yet implemented")
 
             delta_h_sigma_data = (((h_0 - (self.h_bias / self.h_sigma)) ** 2)
                         - h_0 * (np.matmul(mean_h_0, self.W.T)))
@@ -331,7 +329,8 @@ visible/hidden units.
 
     def fit(self, train_data, k=1, learning_rate=0.01,
             num_epochs=5, batch_size=64,
-            test_data=None):
+            test_data=None,
+            show_progress=True):
         num_samples = train_data.shape[0]
         indices = np.arange(num_samples)
         np.random.shuffle(indices)
@@ -341,18 +340,22 @@ visible/hidden units.
 
         for epoch in range(1, num_epochs + 1):
             # compute train & test negative log-likelihood
-            # TODO: compute train- and test-nll in mini-batches to avoid numerical problems
+            # TODO: compute train- and test-nll in mini-batches
+            # to avoid numerical problems
             nll_train = float(np.mean(self.free_energy(train_data)))
             loglikelihood_train.append(nll_train)
-            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
+            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train):"
+                      f" {nll_train:>20.5f}")
 
             if test_data is not None:
                 nll = float(np.mean(self.free_energy(test_data)))
-                _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):  {nll:>20.5f}")
+                _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):"
+                          f"  {nll:>20.5f}")
                 loglikelihood.append(nll)
 
             # iterate through dataset in batches
-            bar = tqdm(total=num_samples)
+            if show_progress:
+                bar = tqdm(total=num_samples)
             for start in range(0, num_samples, batch_size):
                 # ensure we don't go out-of-bounds
                 end = min(start + batch_size, num_samples)
@@ -361,9 +364,11 @@ visible/hidden units.
                 self.step(train_data[start: end], k=k, lr=learning_rate)
 
                 # update progress
-                bar.update(end - start)
+                if show_progress:
+                    bar.update(end - start)
 
-            bar.close()
+            if show_progress:
+                bar.close()
 
             # shuffle indices for next epoch
             np.random.shuffle(indices)
@@ -371,18 +376,21 @@ visible/hidden units.
         # compute train & test negative log-likelihood of final batch
         nll_train = float(np.mean(self.free_energy(train_data)))
         loglikelihood_train.append(nll_train)
-        _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train): {nll_train:>20.5f}")
+        _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train): "
+                  f"{nll_train:>20.5f}")
 
         if test_data is not None:
             nll = float(np.mean(self.free_energy(test_data)))
-            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):  {nll:>20.5f}")
+            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):  "
+                      f"{nll:>20.5f}")
             loglikelihood.append(nll)
 
         return loglikelihood_train, loglikelihood
 
 
 class GaussianRBM(SimpleRBM):
-    """Restricted Boltzmann Machine with Gaussian visible units and Bernoulli hidden units.
+    """Restricted Boltzmann Machine with Gaussian visible units
+    and Bernoulli hidden units.
 
     """
     def __init__(self, num_visible, num_hidden, estimate_visible_sigma=False):
