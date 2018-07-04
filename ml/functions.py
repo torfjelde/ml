@@ -21,3 +21,12 @@ def dot_batch(x, y):
 
     """
     return np.sum(x * y, axis=1)
+
+
+def bernoulli_from_probas(probas):
+    rands = np.random.random(size=probas.shape)
+    return (probas > rands).astype(int)
+
+
+def log_sum_exp(x, alpha):
+    return alpha + np.log(np.exp(x - alpha).sum())

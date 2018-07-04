@@ -9,8 +9,9 @@ from click.testing import CliRunner
 
 from ml import np
 from ml import cli
+from ml.rbms.core import RBM
 from ml.rbms.rbm import BatchBernoulliRBM, BernoulliRBM
-from ml.rbms.gaussian import SimpleRBM, GaussianRBM
+from ml.rbms.gaussian import GaussianRBM
 from ml.datasets import mnist
 
 
@@ -109,10 +110,10 @@ def test_batch_bernoulli(mnist_data):
     # rbm_verify_shapes(rbm2, v, batch_size, visible_size, hidden_size)
     rbm_train_single_sample(rbm2, v)
 
-    # `SimpleRBM` with bernoulli rvs.
-    rbm3 = SimpleRBM(visible_size, hidden_size,
-                     visible_type='bernoulli',
-                     hidden_type='bernoulli')
+    # `RBM` with bernoulli rvs.
+    rbm3 = RBM(visible_size, hidden_size,
+               visible_type='bernoulli',
+               hidden_type='bernoulli')
     rbm_verify_shapes(rbm3, v, batch_size, visible_size, hidden_size)
     rbm_train_single_sample(rbm3, v)
 
