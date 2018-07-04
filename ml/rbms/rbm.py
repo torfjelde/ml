@@ -151,6 +151,8 @@ class GenericRBM(metaclass=abc.ABCMeta):
 class BatchBernoulliRBM(GenericRBM):
     """
     RBM with Bernoulli variables for hidden and visible states.
+
+    DEPRECATED. Use `ml.rbms.BernoulliRBM` instead.
     """
     def __init__(self, num_visible, num_hidden):
         super(BatchBernoulliRBM, self).__init__()
@@ -222,12 +224,14 @@ class BatchBernoulliRBM(GenericRBM):
         return delta_v_bias, delta_h_bias, delta_W
 
 
-class BernoulliRBM(GenericRBM):
+class SimpleBernoulliRBM(GenericRBM):
     """
     RBM with Bernoulli variables for hidden and visible states.
+
+    DEPRECATED. Use `ml.rbms.BernoulliRBM` instead.
     """
     def __init__(self, num_visible, num_hidden):
-        super(BernoulliRBM, self).__init__()
+        super(SimpleBernoulliRBM, self).__init__()
         self.num_visible = num_visible
         self.num_hidden = num_hidden
 
