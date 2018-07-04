@@ -15,6 +15,17 @@ class UnitType(Enum):
     BERNOULLI = 2
 
 
+class RBMSampler(object):
+    """Sampler used in training of RBMs for estimating the gradient.
+
+    """
+    def __init__(self, args):
+        super(RBMSampler, self).__init__()
+        self.args = args
+        
+
+
+
 class RBM:
     """Restricted Boltzmann Machine with either bernoulli or Gaussian
 visible/hidden units.
@@ -22,10 +33,17 @@ visible/hidden units.
     """
     def __init__(self, num_visible, num_hidden,
                  visible_type='bernoulli', hidden_type='bernoulli',
-                 estimate_visible_sigma=False, estimate_hidden_sigma=False):
+                 estimate_visible_sigma=False, estimate_hidden_sigma=False,
+                 sampler_method='cd'):
         super(RBM, self).__init__()
         self.num_visible = num_visible
         self.num_hidden = num_hidden
+
+        if sampler_method.lower() not in {'cd', 'pcd', 'tp'}:
+            raise ValueError(f"{sampler_method} is not supported")
+        self.sampler_method = sampler_method.lower()
+        # used by `PCD` sampler
+        self._prev = None
 
         self.visible_type = getattr(UnitType, visible_type.upper())
         self.hidden_type = getattr(UnitType, hidden_type.upper())
@@ -186,7 +204,9 @@ visible/hidden units.
         # sum across batch to obtain log of joint-likelihood
         return np.sum(hidden + visible)
 
-    def contrastive_divergence(self, v_0, k=1):
+    def contrastive_divergence(self, v_0, k=1,
+                               persistent=False,
+                               burnin=1000):
         """Contrastive Divergence.
 
         Parameters
@@ -206,16 +226,35 @@ visible/hidden units.
             `h` and `v` are the final states for the hidden and
             visible units, respectively.
         """
-        h_0 = self.sample_hidden(v_0)
+        if persistent and self._prev is not None:
+            h_0, v_0 = self._prev
+        else:
+            h_0 = self.sample_hidden(v_0)
 
         v = v_0
         h = h_0
+
+        if persistent and self._prev is None and burnin > 0:
+            _log.info(f"Running PCD using burnin of {burnin}")
+            for i in range(burnin):
+                v = self.sample_visible(h)
+                h = self.sample_hidden(v)
 
         for t in range(k):
             v = self.sample_visible(h)
             h = self.sample_hidden(v)
 
+        if persistent:
+            self._prev = (h, v)
+
         return v_0, h_0, v, h
+
+    def reset_sampler(self):
+        if self.sampler_method == 'pcd':
+            self._prev = None
+
+    def parallel_tempering(self, v_0, k=1, max_temp=100, num_temps=10):
+        raise NotImplementedError("parallel_tempering not yet implemented")
 
     def _update(self, grad, lr=0.1):
         gamma = lr
@@ -250,8 +289,24 @@ visible/hidden units.
 
         return probs
 
-    def grad(self, v, k=1):
-        v_0, h_0, v_k, h_k = self.contrastive_divergence(v, k=k)
+    def grad(self, v, **sampler_kwargs):
+        if self.sampler_method.lower() == 'cd':
+            v_0, h_0, v_k, h_k = self.contrastive_divergence(
+                v,
+                **sampler_kwargs
+            )
+        elif self.sampler_method.lower() == 'pcd':
+            # Persistent Contrastive Divergence
+            v_0, h_0, v_k, h_k = self.contrastive_divergence(
+                v,
+                persistent=True,
+                **sampler_kwargs
+            )
+        elif self.sampler_method.lower() == 'pt':
+            v_0, h_0, v_k, h_k = self.parallel_tempering(
+                v,
+                **sampler_kwargs
+            )
         # all expressions below using `v` or `mean_h` will contain
         # AT LEAST one factor of `1 / v_sigma` and `1 / h_sigma`, respectively
         # so we include those right away
@@ -319,25 +374,76 @@ visible/hidden units.
 
         return grads
 
-    def fit(self, train_data, k=1, learning_rate=0.01,
-            num_epochs=5, batch_size=64,
+    def fit(self, train_data,
+            k=1,
+            learning_rate=0.01,
+            num_epochs=5,
+            batch_size=64,
             test_data=None,
             show_progress=True,
             weight_decay=0.0,
             early_stopping=-1):
+        """
+        Parameters
+        ----------
+        self: type
+            description
+        train_data: array-like
+            Data to fit RBM on.
+        k: int, [default=1]
+            Number of sampling steps to perform. Used by CD-k, PCD-k and PT.
+        learning_rate: float or array, [ðefault=0.01]
+            Learning rate used when updating the parameters.
+            Can also be array of same length as `self.variables`, in
+            which case the learning rate at index `i` will be used to
+            to update `self.variables[i]`.
+        num_epochs: int, [default=5]
+            Number of epochs to train.
+        batch_size: int, [default=64]
+            Batch size to within the epochs.
+        test_data: array-like, [default=None]
+            Data similar to `train_data`, but this will only be used as
+            validation data, not trained on.
+            If specified, will compute and print the free energy / negative
+            log-likelihood on this dataset after each epoch.
+        show_progress: bool, [default=True]
+            If true, will display progress bar for each epoch.
+        weight_decay: float, [default=0.0]
+            If greater than 0.0, weight decay will be appleid to the
+            parameter updates. See `RBM.step` for more information.
+        early_stopping: int, [default=-1]
+            If `test_data` is given and `early_stopping > 0`, training
+            will terminate after epoch if the free energy of the
+            `test_data` did not improve over the fast `early_stopping`
+            epochs.
+
+        Returns
+        -------
+        nlls_train, nlls_test : array-like, array-like
+            Returns the free energy of both `train_data` and `test_data`
+            as computed at each epoch.
+
+        """
         num_samples = train_data.shape[0]
         indices = np.arange(num_samples)
         np.random.shuffle(indices)
 
-        loglikelihood_train = []
-        loglikelihood = []
+        nlls_train = []
+        nlls = []
+
+        prev_best = 0.0
 
         for epoch in range(1, num_epochs + 1):
+            # reset sampler at beginning of epoch
+            # Used by methods such as PCD to reset the
+            # initialization value.
+            self.reset_sampler()
+
             # compute train & test negative log-likelihood
             # TODO: compute train- and test-nll in mini-batches
             # to avoid numerical problems
             nll_train = float(np.mean(self.free_energy(train_data)))
-            loglikelihood_train.append(nll_train)
+            nlls_train.append(nll_train)
             _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train):"
                       f" {nll_train:>20.5f}")
 
@@ -345,11 +451,18 @@ visible/hidden units.
                 nll = float(np.mean(self.free_energy(test_data)))
                 _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):"
                           f"  {nll:>20.5f}")
-                loglikelihood.append(nll)
+                nlls.append(nll)
 
-                if epoch > early_stopping and \
-                   np.all(test_data[epoch - early_stopping] > nll):
-                    break
+                # stop early if all `early_stopping` previous
+                # evaluations on `test_data` did not improve.
+                if early_stopping > 0:
+                    if epoch > early_stopping and \
+                       np.all(test_data[epoch - early_stopping]
+                              > prev_best):
+                        break
+                    else:
+                        # update `prev_best`
+                        prev_best = nll
 
             # iterate through dataset in batches
             if show_progress:
@@ -376,7 +489,7 @@ visible/hidden units.
 
         # compute train & test negative log-likelihood of final batch
         nll_train = float(np.mean(self.free_energy(train_data)))
-        loglikelihood_train.append(nll_train)
+        nlls_train.append(nll_train)
         _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train): "
                   f"{nll_train:>20.5f}")
 
@@ -384,6 +497,6 @@ visible/hidden units.
             nll = float(np.mean(self.free_energy(test_data)))
             _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):  "
                       f"{nll:>20.5f}")
-            loglikelihood.append(nll)
+            nlls.append(nll)
 
-        return loglikelihood_train, loglikelihood
+        return nlls_train, nlls
