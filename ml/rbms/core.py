@@ -500,3 +500,17 @@ visible/hidden units.
             nlls.append(nll)
 
         return nlls_train, nlls
+
+
+class BernoulliRBM(RBM):
+    """Restricted Boltzmann Machine (RBM) with both hidden and visible
+    variables assumed to be Bernoulli random variables.
+
+    """
+    def __init__(self, num_visible, num_hidden):
+        super(BernoulliRBM, self).__init__(
+            num_visible,
+            num_hidden,
+            visible_type='bernoulli',
+            hidden_type='bernoulli'
+        )
