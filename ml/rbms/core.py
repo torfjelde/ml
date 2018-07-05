@@ -39,7 +39,7 @@ visible/hidden units.
         self.num_visible = num_visible
         self.num_hidden = num_hidden
 
-        if sampler_method.lower() not in {'cd', 'pcd', 'tp'}:
+        if sampler_method.lower() not in {'cd', 'pcd', 'pt'}:
             raise ValueError(f"{sampler_method} is not supported")
         self.sampler_method = sampler_method.lower()
         # used by `PCD` sampler
@@ -105,59 +105,60 @@ visible/hidden units.
 
         return - (visible + hidden + covariance)
 
-    def mean_visible(self, h):
+    def mean_visible(self, h, beta=1.0):
         "Computes conditional expectation E[v | h]."
         mean = self.v_bias + (self.v_sigma *
                               np.matmul(h / self.h_sigma, self.W.T))
         if self.visible_type == UnitType.BERNOULLI:
-            return sigmoid(mean)
+            return sigmoid(mean * beta)
         elif self.visible_type == UnitType.GAUSSIAN:
             return mean
 
-    def mean_hidden(self, v):
+    def mean_hidden(self, v, beta=1.0):
         "Computes conditional expectation E[h | v]."
         mean = self.h_bias + self.h_sigma * np.matmul(v / self.v_sigma, self.W)
         if self.hidden_type == UnitType.BERNOULLI:
-            return sigmoid(mean)
+            return sigmoid(mean * beta)
         elif self.hidden_type == UnitType.GAUSSIAN:
             return mean
 
-    def sample_visible(self, h):
-        mean = self.mean_visible(h)
+    def sample_visible(self, h, beta=1.0):
+        mean = self.mean_visible(h, beta=beta)
         if self.visible_type == UnitType.BERNOULLI:
             # E[v | h] = p(v | h) for Bernoulli
             v = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
             v = np.random.normal(loc=mean,
-                                 scale=self.v_sigma ** 2,
+                                 scale=self.v_sigma ** 2 / beta,
                                  size=mean.shape)
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
         return v
 
-    def sample_hidden(self, v):
-        mean = self.mean_hidden(v)
+    def sample_hidden(self, v, beta=1.0):
+        mean = self.mean_hidden(v, beta=beta)
         if self.visible_type == UnitType.BERNOULLI:
             # E[v | h] = p(v | h) for Bernoulli
             h = bernoulli_from_probas(mean)
         elif self.visible_type == UnitType.GAUSSIAN:
             h = np.random.normal(loc=mean,
-                                 scale=(self.h_sigma ** 2),
+                                 scale=(self.h_sigma ** 2 / beta),
                                  size=(mean.shape))
         else:
             raise ValueError(f"unknown type {self.visible_type}")
 
         return h
 
-    def proba_visible(self, h, v=None):
-        mean = self.mean_visible(h)
+    def proba_visible(self, h, v=None, beta=1.0):
+        mean = self.mean_visible(h, beta=beta)
         if self.visible_type == UnitType.BERNOULLI:
             # E[v | h] = p(v | h) for Bernoulli
             p = mean
         elif self.visible_type == UnitType.GAUSSIAN:
             z = np.clip((v - mean) ** 2 / (2.0 * self.v_sigma ** 2),
                         -30.0, 30.0)
+            z *= beta
             p = (np.exp(z) / (np.sqrt(2 * np.pi) * self.v_sigma
                               + np.finfo(np.float32).eps))
         else:
@@ -165,14 +166,15 @@ visible/hidden units.
 
         return p
 
-    def proba_hidden(self, v, h=None):
-        mean = self.mean_hidden(v)
+    def proba_hidden(self, v, h=None, beta=1.0):
+        mean = self.mean_hidden(v, beta=beta)
         if self.hidden_type == UnitType.BERNOULLI:
             # E[v | h] = p(v | h) for Bernoulli
             p = mean
         elif self.hidden_type == UnitType.GAUSSIAN:
             z = np.clip((h - mean) ** 2 / (2.0 * self.h_sigma ** 2),
                         -30.0, 30.0)
+            z *= beta
             p = (np.exp(z) / (np.sqrt(2 * np.pi) * self.h_sigma
                               + np.finfo(np.float32).eps))
         else:
@@ -180,9 +182,10 @@ visible/hidden units.
 
         return p
 
-    def free_energy(self, v):
+    def free_energy(self, v, beta=1.0):
         if self.hidden_type == UnitType.BERNOULLI:
             hidden = self.h_bias + np.matmul((v / self.v_sigma), self.W)
+            hidden *= beta
             hidden = - np.sum(np.log(1.0 + np.exp(np.clip(hidden, -30, 30))),
                               axis=1)
         elif self.hidden_type == UnitType.GAUSSIAN:
@@ -192,10 +195,11 @@ visible/hidden units.
 
         if self.visible_type == UnitType.BERNOULLI:
             visible = - np.matmul(v, self.v_bias)
+            visible *= beta
         elif self.visible_type == UnitType.GAUSSIAN:
             visible = 0.5 * np.sum(
                 ((v - self.v_bias) ** 2)
-                / (self.v_sigma ** 2 + np.finfo(np.float32).eps),
+                / (self.v_sigma ** 2 / beta + np.finfo(np.float32).eps),
                 axis=1
             )
         else:
@@ -206,7 +210,8 @@ visible/hidden units.
 
     def contrastive_divergence(self, v_0, k=1,
                                persistent=False,
-                               burnin=1000):
+                               burnin=1000,
+                               beta=1.0):
         """Contrastive Divergence.
 
         Parameters
@@ -229,7 +234,7 @@ visible/hidden units.
         if persistent and self._prev is not None:
             h_0, v_0 = self._prev
         else:
-            h_0 = self.sample_hidden(v_0)
+            h_0 = self.sample_hidden(v_0, beta=beta)
 
         v = v_0
         h = h_0
@@ -237,12 +242,12 @@ visible/hidden units.
         if persistent and self._prev is None and burnin > 0:
             _log.info(f"Running PCD using burnin of {burnin}")
             for i in range(burnin):
-                v = self.sample_visible(h)
-                h = self.sample_hidden(v)
+                v = self.sample_visible(h, beta=beta)
+                h = self.sample_hidden(v, beta=beta)
 
         for t in range(k):
-            v = self.sample_visible(h)
-            h = self.sample_hidden(v)
+            v = self.sample_visible(h, beta=beta)
+            h = self.sample_hidden(v, beta=beta)
 
         if persistent:
             self._prev = (h, v)
@@ -253,8 +258,72 @@ visible/hidden units.
         if self.sampler_method == 'pcd':
             self._prev = None
 
-    def parallel_tempering(self, v_0, k=1, max_temp=100, num_temps=10):
-        raise NotImplementedError("parallel_tempering not yet implemented")
+    def parallel_tempering(self, v_0, k=1, max_temp=100, num_temps=10,
+                           include_negative_shift=False):
+        batch_size = v_0.shape[0]
+
+        # 1. Initialize list of samples
+        betas = np.linspace(1, max_temp, num_temps) ** (-1)
+        R = len(betas)
+        res = []
+
+        if include_negative_shift:
+            neg_res = []
+
+        # 2. Perform gibbs sampling for tempered distributions
+        for r in range(R):
+            v_0, h_0, v_k, h_k = self.contrastive_divergence(
+                v_0,
+                k=k,
+                beta=betas[r]
+            )
+            res.append((v_k, h_k))
+
+            if include_negative_shift:
+                neg_res.append((v_0, h_0))
+
+        # 3. Simulated Annealing to perform swaps ("exchange particles")
+        for r in range(R - 1, 0, -1):
+            a = np.exp((betas[r] - betas[r - 1]) *
+                       (self.energy(*res[r]) - self.energy(*res[r - 1])))
+            u = np.random.random(batch_size)
+            # acceptance mask
+            acc_mask = (u < a).reshape(batch_size, 1)
+            # reject mask
+            rej_mask = ~acc_mask
+
+            v = res[r][0] * acc_mask + res[r - 1][0] * rej_mask
+            h = res[r][1] * acc_mask + res[r - 1][1] * rej_mask
+            res[r - 1] = v, h
+
+            v = res[r - 1][0] * acc_mask + res[r][0] * rej_mask
+            h = res[r - 1][1] * acc_mask + res[r][1] * rej_mask
+            res[r] = v, h
+
+        # possibly perform same for the negative shift
+        if include_negative_shift:
+            for r in range(R - 1, 0, -1):
+                a = np.exp((betas[r] - betas[r - 1]) *
+                           (self.energy(*neg_res[r]) - self.energy(*neg_res[r - 1])))
+                u = np.random.random(batch_size)
+                # acceptance mask
+                acc_mask = (u < a).reshape(batch_size, 1)
+                # reject mask
+                rej_mask = ~acc_mask
+
+                v = neg_res[r][0] * acc_mask + neg_res[r - 1][0] * rej_mask
+                h = neg_res[r][1] * acc_mask + neg_res[r - 1][1] * rej_mask
+                neg_res[r - 1] = v, h
+
+                v = neg_res[r - 1][0] * acc_mask + neg_res[r][0] * rej_mask
+                h = neg_res[r - 1][1] * acc_mask + neg_res[r][1] * rej_mask
+                neg_res[r] = v, h
+
+        # return final state
+        if include_negative_shift:
+            return neg_res[0], res[0]
+        else:
+            return res[0]
 
     def _update(self, grad, lr=0.1):
         gamma = lr
@@ -268,10 +337,10 @@ visible/hidden units.
             # default is gradient DEscent, so weight-decay also switches signs
             self.variables[i] += lmbda * self.variables[i]
 
-    def step(self, v, k=1, lr=0.1, lmbda=0.0):
+    def step(self, v, k=1, lr=0.1, lmbda=0.0, **sampler_kwargs):
         "Performs a single gradient DEscent step on the batch `v`."
         # compute gradient for each observed visible configuration
-        grad = self.grad(v, k=k)
+        grad = self.grad(v, k=k, **sampler_kwargs)
 
         # update parameters
         self._update(grad, lr=lr)
@@ -303,10 +372,20 @@ visible/hidden units.
                 **sampler_kwargs
             )
         elif self.sampler_method.lower() == 'pt':
-            v_0, h_0, v_k, h_k = self.parallel_tempering(
-                v,
-                **sampler_kwargs
-            )
+            if sampler_kwargs.get("include_negative_shift", False):
+                v_0, h_0, v_k, h_k = self.parallel_tempering(
+                    v,
+                    **sampler_kwargs
+                )
+            else:
+                v_0 = v
+                v_k, h_k = self.parallel_tempering(
+                    v,
+                    **sampler_kwargs
+                )
+        else:
+            raise ValueError(f"{self.sampler_method} is not supported")
+        
         # all expressions below using `v` or `mean_h` will contain
         # AT LEAST one factor of `1 / v_sigma` and `1 / h_sigma`, respectively
         # so we include those right away
@@ -382,7 +461,8 @@ visible/hidden units.
             test_data=None,
             show_progress=True,
             weight_decay=0.0,
-            early_stopping=-1):
+            early_stopping=-1,
+            **sampler_kwargs):
         """
         Parameters
         ----------
@@ -475,7 +555,8 @@ visible/hidden units.
                 self.step(train_data[start: end],
                           k=k,
                           lr=learning_rate,
-                          lmbda=weight_decay)
+                          lmbda=weight_decay,
+                          **sampler_kwargs)
 
                 # update progress
                 if show_progress:

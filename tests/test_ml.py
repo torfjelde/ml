@@ -51,12 +51,10 @@ def rbm_verify_shapes(model, v, batch_size, visible_size, hidden_size):
     model.step(v, k=1)
 
 
-def rbm_train_single_sample(model, v, steps=100):
+def rbm_train_single_sample(model, v, **fit_kwargs):
     nll = model.free_energy(v)
 
-    model.fit(v, batch_size=1, num_epochs=25, show_progress=False)
-    # for i in range(steps):
-    #     model.step(v)
+    model.fit(v, batch_size=1, num_epochs=25, show_progress=False, **fit_kwargs)
 
     nll_new = model.free_energy(v)
 
@@ -135,6 +133,65 @@ def test_batch_bernoulli(mnist_data):
                       == rbm2.proba_visible(h[i]))
         assert np.all(rbm1.free_energy(v[i].reshape(1, -1))
                       == rbm2.free_energy(v[i]))
+
+
+def test_rbm_betas(mnist_data):
+    np.random.seed(RANDOM_SEED)
+    X, _, _, _ = mnist_data
+    batch_size = 10
+    visible_size = X.shape[1]
+    hidden_size = 100
+    v = X[:batch_size]
+
+    rbm = RBM(visible_size, hidden_size, sampler_method='pt')
+
+    a = rbm.proba_hidden(v, beta=0.8)
+    b = rbm.proba_hidden(v)
+
+    assert a.shape == b.shape
+
+    # ensure some different probas
+    diff_mask = (a != b)
+    assert a[diff_mask].shape[0] > 0
+
+    np.random.seed(RANDOM_SEED)
+    a = rbm.sample_hidden(v, beta=1.0)
+    np.random.seed(RANDOM_SEED)
+    b = rbm.sample_hidden(v, beta=0.8)
+    np.random.seed(RANDOM_SEED)
+    c = rbm.sample_hidden(v, beta=0.1)
+
+    diff_mask = (a != b)
+    diff_mask2 = (a != c)
+    assert a[diff_mask].shape[0] > 0
+    assert a[diff_mask2].shape[0] > 0
+    # lower beta == higher temperature => more different samples
+    assert a[diff_mask2].shape[0] > a[diff_mask].shape[0]
+
+    # run through some functions
+    h = rbm.sample_hidden(v, beta=0.5)
+    a = rbm.proba_visible(h, beta=0.5)
+
+    assert rbm.energy(v, h).shape == (batch_size, )
+    print(rbm.energy(v, h).shape)
+
+    import logging
+    logging.getLogger("ml").setLevel(logging.DEBUG)
+
+    np.random.seed(RANDOM_SEED)
+    v_k, h_k = rbm.parallel_tempering(v, max_temp=10, num_temps=10)
+    assert v_k.shape == v.shape and h_k.shape == h.shape
+
+    np.random.seed(RANDOM_SEED)
+    v_k2, h_k2 = rbm.parallel_tempering(v, max_temp=1000000, num_temps=10)
+    diff_mask_v = v_k2 != v_k
+    diff_mask_h = h_k2 != h_k
+
+    assert v_k[diff_mask_v].shape[0] > 0
+    assert h_k[diff_mask_h].shape[0] > 0
+
+    # train it
+    rbm_train_single_sample(rbm, v, num_temps=10, max_temp=100)
 
 # def test_command_line_interface():
 #     """Test the CLI."""
