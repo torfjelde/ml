@@ -258,9 +258,14 @@ visible/hidden units.
         if self.sampler_method == 'pcd':
             self._prev = None
 
-    def parallel_tempering(self, v_0, k=1, max_temp=100, num_temps=10,
+    def parallel_tempering(self, v, k=1, max_temp=100, num_temps=10,
                            include_negative_shift=False):
-        batch_size = v_0.shape[0]
+        # TODO: Performing sampling in parallel, rather than using a loop
+        # 1. Allow `self.contrastive_divergence` to take on arrays of betas
+        # 2. Stack betas and initial samples
+        # 3. Perform sampling
+        # 4. Unstack
+        batch_size = v.shape[0]
 
         # 1. Initialize list of samples
         betas = np.linspace(1, max_temp, num_temps) ** (-1)
@@ -273,7 +278,7 @@ visible/hidden units.
         # 2. Perform gibbs sampling for tempered distributions
         for r in range(R):
             v_0, h_0, v_k, h_k = self.contrastive_divergence(
-                v_0,
+                v,
                 k=k,
                 beta=betas[r]
             )
