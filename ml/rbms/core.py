@@ -327,8 +327,8 @@ class RBM:
         h = h_0
 
         if persistent and self._prev is None and burnin > 0:
-            _log.info(f"Running PCD using burnin of {burnin}")
-            for i in range(burnin):
+            # _log.info(f"Running PCD using burnin of {burnin}")
+            for _ in range(burnin):
                 v = self.sample_visible(h, beta=beta)
                 h = self.sample_hidden(v, beta=beta)
 
@@ -345,7 +345,9 @@ class RBM:
         if self.sampler_method == 'pcd':
             self._prev = None
 
-    def parallel_tempering(self, v, k=1, max_temp=100, num_temps=10,
+    def parallel_tempering(self, v, k=1,
+                           betas=None,
+                           max_temp=100, num_temps=10,
                            include_negative_shift=False):
         # TODO: Performing sampling in parallel, rather than using a loop
         # 1. Allow `self.contrastive_divergence` to take on arrays of betas
@@ -355,7 +357,9 @@ class RBM:
         batch_size = v.shape[0]
 
         # 1. Initialize list of samples
-        betas = np.linspace(1, max_temp, num_temps) ** (-1)
+        if betas is None:
+            betas = np.linspace(1, max_temp, num_temps) ** (-1)
+
         R = len(betas)
         res = []
 
