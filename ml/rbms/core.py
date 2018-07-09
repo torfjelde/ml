@@ -435,9 +435,12 @@ class RBM:
             return res[0]
 
     def _update(self, grad, lr=0.1):
+        # in case using `cupy`, can't use `np.shape`
+        # to obtain "shape" of single element; this is a fix
+        lr = np.asarray(lr)
         gamma = lr
         for i in range(len(self.variables)):
-            if np.shape(lr):
+            if lr.shape:
                 gamma = lr[i]
             self.variables[i] -= gamma * grad[i]
 
