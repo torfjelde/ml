@@ -70,6 +70,8 @@ class RBM:
                  estimate_visible_sigma=False, estimate_hidden_sigma=False,
                  sampler_method='cd'):
         super(RBM, self).__init__()
+        self._warned_acceptance = 0
+        
         self.num_visible = num_visible
         self.num_hidden = num_hidden
 
@@ -258,7 +260,7 @@ class RBM:
 
         return p
 
-    def free_energy(self, v, beta=1.0):
+    def free_energy(self, v, beta=1.0, raw=False):
         if self.hidden_type == UnitType.BERNOULLI:
             hidden = self.h_bias + np.matmul((v / self.v_sigma), self.W)
             hidden *= beta
@@ -290,7 +292,10 @@ class RBM:
             raise ValueError(f"unknown type {self.visible_type}")
 
         # sum across batch to obtain log of joint-likelihood
-        return np.sum(hidden + visible)
+        if raw:
+            return hidden + visible
+        else:
+            return np.mean(hidden + visible)
 
     def contrastive_divergence(self, v_0, k=1,
                                persistent=False,
@@ -383,12 +388,22 @@ class RBM:
             h = res[r][1] * acc_mask + res[r - 1][1] * rej_mask
             res[r - 1] = v, h
 
+            # TODO: this is useless, right? We're not ever using `res[r]` again
+            # in this iteration
             v = res[r - 1][0] * acc_mask + res[r][0] * rej_mask
             h = res[r - 1][1] * acc_mask + res[r][1] * rej_mask
             res[r] = v, h
 
-            # if r == 1:
-            #     _log.info(acc_mask[acc_mask].shape)
+            # warn user if very small/large number of samples rejected/accepted
+            # but don't if the `batch_size` is super small..
+            if r == 1 and batch_size > 2 and self._warned_acceptance < 10:
+                num_acc = acc_mask[acc_mask].shape[0]
+                if num_acc >= 0.9 * batch_size:
+                    _log.warn(f"Large porition of tempered samples accepted ({num_acc} / {batch_size})")
+                    self._warned_acceptance += 1
+                elif num_acc <= 0.1 * batch_size:
+                    _log.warn(f"Small porition of tempered samples accepted ({num_acc} / {batch_size})")
+                    self._warned_acceptance += 1
 
         # possibly perform same for the negative shift
         if include_negative_shift:
