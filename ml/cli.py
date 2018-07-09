@@ -35,6 +35,9 @@ def rbm():
               type=click.Choice(["bernoulli", "gaussian"]),
               show_default=True,
               help="Type of RBM to use.")
+@click.option("--sampler", default='cd',
+              type=click.Choice(["CD", "PCD", "PT"]),
+              show_default=True)
 @click.option("--gpu", is_flag=True, show_default=True,
               help="Whether or not to use the GPU. Requires CUDA and cupy installed.")
 @click.option("--output", type=str, default="sample.png", show_default=True,
@@ -47,7 +50,8 @@ def rbm():
               help="Set the logging level, e.g. INFO, DEBUG, WARNING.")
 def train_rbm(dataset, dataset_path,
               k, batch_size, hidden_size, epochs, lr,
-              rbm_type, gpu, output, show, noise, loglevel):
+              rbm_type, sampler, gpu,
+              output, show, noise, loglevel):
     """Train an RBM on some dataset."""
     log = logging.getLogger("ml")
     log.setLevel(getattr(logging, loglevel))
@@ -56,8 +60,8 @@ def train_rbm(dataset, dataset_path,
         from . import initialize_gpu
         initialize_gpu()
 
-    from .rbms.rbm import BernoulliRBM, BatchBernoulliRBM
-    from .rbms.gaussian import GaussianRBM, SimpleRBM
+    from .rbms import RBM
+    from .rbms.gaussian import GaussianRBM
     from . import datasets
 
     # load data
@@ -77,14 +81,12 @@ def train_rbm(dataset, dataset_path,
 
     # use non-batch implementation if using CPU as it seems to be faster
     if rbm_type == "gaussian":
-        model = GaussianRBM(input_size, hidden_size)
-    elif gpu:
-        # model = BatchBernoulliRBM(input_size, hidden_size)
-        model = SimpleRBM(input_size, hidden_size,
-                          visible_type='bernoulli',
-                          hidden_type='bernoulli')
+        model = GaussianRBM(input_size, hidden_size, sampler_method=sampler)
     else:
-        model = BernoulliRBM(input_size, hidden_size)
+        model = RBM(input_size, hidden_size,
+                    visible_type='bernoulli',
+                    hidden_type='bernoulli',
+                    sampler_method=sampler)
 
     log.info("Training...")
     nll_train, nll_test = model.fit(

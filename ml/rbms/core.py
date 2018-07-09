@@ -22,13 +22,47 @@ class RBMSampler(object):
     def __init__(self, args):
         super(RBMSampler, self).__init__()
         self.args = args
-        
-
 
 
 class RBM:
-    """Restricted Boltzmann Machine with either bernoulli or Gaussian
-visible/hidden units.
+    """
+    Restricted Boltzmann Machine with either Bernoulli or Gaussian
+    visible/hidden units.
+
+    Attributes
+    ---------
+    num_visible: int
+        Number of visible units.
+    num_hidden: int
+        Number of hidden units.
+    visible_type: UnitType or str, default='bernoulli'
+        Type of random variable the visible units are assumed to be.
+    hidden_type: UnitType or str, default='bernoulli'
+        Type of random variable the hidden units are assumed to be.
+    estimate_visible_sigma: bool, default=False
+        Whether or not to estimate the variance of the visible units.
+        If :attr:`visible_type` is non-Gaussian, then this has no effect.
+    estimate_hidden_sigma: bool, default=False
+        Whether or not to estimate the variance of the hidden units.
+        If :attr:`hidden_type` is non-Gaussian, then this has no effect.
+    sampler_method: str, default='cd'
+        Specifies the method used in the sampling process when approximating
+        the gradient.
+        Available methods are:
+
+        - Contrastive Divergence (CD)
+        - Persistent Contrastive Divergence (PCD)
+        - Parallel Tempering (PT)
+
+        See :func:`RBM.grad` for more information about the
+        effects of the different available methods.
+    variables: list[array-like]
+        Holds the learnable parameters of the machine. This is used by
+        :func:`RBM.step` to deduce what parameters to update.
+
+    See Also
+    --------
+    :func:`RBM.grad` for more information about samplers.
 
     """
     def __init__(self, num_visible, num_hidden,
@@ -45,8 +79,14 @@ visible/hidden units.
         # used by `PCD` sampler
         self._prev = None
 
-        self.visible_type = getattr(UnitType, visible_type.upper())
-        self.hidden_type = getattr(UnitType, hidden_type.upper())
+        if isinstance(visible_type, str):
+            self.visible_type = getattr(UnitType, visible_type.upper())
+        else:
+            self.visible_type = visible_type
+        if isinstance(hidden_type, str):
+            self.hidden_type = getattr(UnitType, hidden_type.upper())
+        else:
+            self.hidden_type = hidden_type
 
         self.estimate_visible_sigma = estimate_visible_sigma
         self.estimate_hidden_sigma = estimate_hidden_sigma
@@ -106,7 +146,43 @@ visible/hidden units.
         return - (visible + hidden + covariance)
 
     def mean_visible(self, h, beta=1.0):
-        "Computes conditional expectation E[v | h]."
+        r"""
+        Computes :math:`\mathbb{E}[\mathbf{v} \mid \mathbf{h}]`.
+
+        It can be shown that this expectation equals: [1]_
+
+        - Bernoulli:
+
+          .. math::
+            :nowrap:
+
+            \begin{equation}
+            \mathbb{E}[\mathbf{v} \mid \mathbf{h}] =
+            p \big( V_{i} = 1 \mid \mathbf{h} \big) = \text{sigmoid}
+            \Bigg( \beta \bigg( b_{i} + \sum_{\mu=1}^{|\mathcal{H}|} W_{i \mu} \frac{h_{\mu}}{\sigma_{\mu}} \bigg) \Bigg)
+            \end{equation}
+
+        - Gaussian:
+
+          .. math::
+            :nowrap:
+
+            \begin{equation*}
+            \mathbb{E}[\mathbf{v} \mid \mathbf{h}] = b_i + \sigma_i \sum_{\mu=1}^{|\mathcal{H}|} W_{i \mu} \frac{h_{\mu}}{\sigma_{\mu}}
+            \end{equation*}
+
+        where :math:`\sigma_{\mu} = 1` if :math:`H_\mu` is a Bernoulli random variable.
+        
+        Notes
+        -----
+        Observe that the expectation when using Gaussian units is
+        independent of :math:`\beta`. To see the effect :math:`\beta` has
+        on the Gaussian case, see :func:`RBM.proba_visible`.
+
+        References
+        ----------
+        .. [1] Fjelde, T. E., Restricted Boltzmann Machines, , (),  (2018).
+        """
         mean = self.v_bias + (self.v_sigma *
                               np.matmul(h / self.h_sigma, self.W.T))
         if self.visible_type == UnitType.BERNOULLI:
@@ -191,7 +267,15 @@ visible/hidden units.
         elif self.hidden_type == UnitType.GAUSSIAN:
             # TODO: Implement
             # Have the formulas, but gotta make sure yo!
-            raise NotImplementedError()
+            hidden = np.sum(
+                1 / (2 * self.h_sigma) * (
+                    self.h_bias ** 2
+                    - (self.h_bias + self.h_sigma * np.matmul(v / self.v_sigma, self.W)) ** 2
+                ),
+                axis=1
+            )
+            hidden -= 0.5 * self.num_hidden * np.log(2 * np.pi) + np.sum(np.log(self.h_sigma))
+            # raise NotImplementedError()
 
         if self.visible_type == UnitType.BERNOULLI:
             visible = - np.matmul(v, self.v_bias)
@@ -216,8 +300,6 @@ visible/hidden units.
 
         Parameters
         ----------
-        self: type
-            description
         v_0: array-like
             Visible state to initialize the chain from.
         k: int
@@ -226,9 +308,9 @@ visible/hidden units.
         Returns
         -------
         h_0, h, v_0, v: arrays
-            `h_0` and `v_0` are the initial states for the hidden and
+            ``h_0`` and ``v_0`` are the initial states for the hidden and
             visible units, respectively.
-            `h` and `v` are the final states for the hidden and
+            ``h`` and ``v`` are the final states for the hidden and
             visible units, respectively.
         """
         if persistent and self._prev is not None:
@@ -304,6 +386,9 @@ visible/hidden units.
             v = res[r - 1][0] * acc_mask + res[r][0] * rej_mask
             h = res[r - 1][1] * acc_mask + res[r][1] * rej_mask
             res[r] = v, h
+
+            # if r == 1:
+            #     _log.info(acc_mask[acc_mask].shape)
 
         # possibly perform same for the negative shift
         if include_negative_shift:
@@ -467,45 +552,44 @@ visible/hidden units.
             show_progress=True,
             weight_decay=0.0,
             early_stopping=-1,
+            callbacks={},
             **sampler_kwargs):
         """
         Parameters
         ----------
-        self: type
-            description
         train_data: array-like
             Data to fit RBM on.
-        k: int, [default=1]
+        k: int, default=1
             Number of sampling steps to perform. Used by CD-k, PCD-k and PT.
-        learning_rate: float or array, [ðefault=0.01]
+        learning_rate: float or array, default=0.01
             Learning rate used when updating the parameters.
             Can also be array of same length as `self.variables`, in
             which case the learning rate at index `i` will be used to
-            to update `self.variables[i]`.
-        num_epochs: int, [default=5]
+            to update ``RBM.variables[i]``.
+        num_epochs: int, default=5
             Number of epochs to train.
-        batch_size: int, [default=64]
+        batch_size: int, default=64
             Batch size to within the epochs.
-        test_data: array-like, [default=None]
-            Data similar to `train_data`, but this will only be used as
+        test_data: array-like, default=None
+            Data similar to ``train_data``, but this will only be used as
             validation data, not trained on.
             If specified, will compute and print the free energy / negative
             log-likelihood on this dataset after each epoch.
-        show_progress: bool, [default=True]
+        show_progress: bool, default=True
             If true, will display progress bar for each epoch.
-        weight_decay: float, [default=0.0]
-            If greater than 0.0, weight decay will be appleid to the
-            parameter updates. See `RBM.step` for more information.
-        early_stopping: int, [default=-1]
-            If `test_data` is given and `early_stopping > 0`, training
+        weight_decay: float, default=0.0
+            If greater than 0.0, weight decay will be applied to the
+            parameter updates. See :func:`RBM.step` for more information.
+        early_stopping: int, default=-1
+            If ``test_data`` is given and ``early_stopping > 0``, training
             will terminate after epoch if the free energy of the
-            `test_data` did not improve over the fast `early_stopping`
+            ``test_data`` did not improve over the fast ``early_stopping``
             epochs.
 
         Returns
         -------
         nlls_train, nlls_test : array-like, array-like
-            Returns the free energy of both `train_data` and `test_data`
+            Returns the free energy of both ``train_data`` and ``test_data``
             as computed at each epoch.
 
         """
@@ -516,9 +600,13 @@ visible/hidden units.
         nlls_train = []
         nlls = []
 
-        prev_best = 0.0
+        prev_best = None
 
         for epoch in range(1, num_epochs + 1):
+            if "pre_epoch" in callbacks:
+                for c in callbacks["pre_epoch"]:
+                    c(self, epoch)
+
             # reset sampler at beginning of epoch
             # Used by methods such as PCD to reset the
             # initialization value.
@@ -529,12 +617,12 @@ visible/hidden units.
             # to avoid numerical problems
             nll_train = float(np.mean(self.free_energy(train_data)))
             nlls_train.append(nll_train)
-            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train):"
+            _log.info(f"[{epoch:03d} / {num_epochs:03d}] NLL (train):"
                       f" {nll_train:>20.5f}")
 
             if test_data is not None:
                 nll = float(np.mean(self.free_energy(test_data)))
-                _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):"
+                _log.info(f"[{epoch:03d} / {num_epochs:03d}] NLL (test):"
                           f"  {nll:>20.5f}")
                 nlls.append(nll)
 
@@ -542,12 +630,15 @@ visible/hidden units.
                 # evaluations on `test_data` did not improve.
                 if early_stopping > 0:
                     if epoch > early_stopping and \
-                       np.all(test_data[epoch - early_stopping]
-                              > prev_best):
+                       np.all([a >= prev_best for a in nlls[epoch - early_stopping:]]):
+                        _log.info("Hasn't improved in {early_stopping} epochs; stopping early")
                         break
                     else:
                         # update `prev_best`
-                        prev_best = nll
+                        if prev_best is None:
+                            prev_best = nll
+                        elif nll < prev_best:
+                            prev_best = nll
 
             # iterate through dataset in batches
             if show_progress:
@@ -563,6 +654,10 @@ visible/hidden units.
                           lmbda=weight_decay,
                           **sampler_kwargs)
 
+                if "post_step" in callbacks:
+                    for c in callbacks["post_step"]:
+                        c(self, epoch, end)
+
                 # update progress
                 if show_progress:
                     bar.update(end - start)
@@ -573,19 +668,68 @@ visible/hidden units.
             # shuffle indices for next epoch
             np.random.shuffle(indices)
 
+            if "post_epoch" in callbacks:
+                for c in callbacks["post_epoch"]:
+                    c(self, epoch)
+
         # compute train & test negative log-likelihood of final batch
         nll_train = float(np.mean(self.free_energy(train_data)))
         nlls_train.append(nll_train)
-        _log.info(f"[{epoch:02d} / {num_epochs}] NLL (train): "
+        _log.info(f"[{epoch:03d} / {num_epochs:03d}] NLL (train): "
                   f"{nll_train:>20.5f}")
 
         if test_data is not None:
             nll = float(np.mean(self.free_energy(test_data)))
-            _log.info(f"[{epoch:02d} / {num_epochs}] NLL (test):  "
+            _log.info(f"[{epoch:03d} / {num_epochs:03d}] NLL (test):  "
                       f"{nll:>20.5f}")
             nlls.append(nll)
 
         return nlls_train, nlls
+
+    def dump(self, path, *attrs):
+        import pickle
+
+        if not attrs:
+            attrs = [
+                'num_visible',
+                'num_hidden',
+                'visible_type',
+                'hidden_type',
+                'estimate_visible_sigma',
+                'estimate_hidden_sigma',
+                'variables',
+                'v_bias',
+                'h_bias',
+                'W',
+                'v_sigma',
+                'h_sigma'
+            ]
+
+        state = {}
+
+        for a in attrs:
+            state[a] = getattr(self, a)
+
+        with open(path, "wb") as f:
+            pickle.dump(state, f)
+
+    @classmethod
+    def load(cls, path):
+        import pickle
+
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+
+        model = cls(num_visible=state['num_visible'],
+                    num_hidden=state['num_hidden'],
+                    visible_type=state['visible_type'],
+                    hidden_type=state['hidden_type'],
+                    estimate_visible_sigma=state['estimate_visible_sigma'],
+                    estimate_hidden_sigma=state['estimate_hidden_sigma'])
+        for a in state:
+            setattr(model, a, state[a])
+
+        return model
 
 
 class BernoulliRBM(RBM):

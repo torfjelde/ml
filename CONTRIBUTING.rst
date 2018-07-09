@@ -42,6 +42,8 @@ ml could always use more documentation, whether as part of the
 official ml docs, in docstrings, or even on the web in blog posts,
 articles, and such.
 
+We follow the Numpy docstring style. For more information see http://numpydoc.readthedocs.io/en/latest/format.html.
+
 Submit Feedback
 ~~~~~~~~~~~~~~~
 
