@@ -244,6 +244,9 @@ class RBM:
 
         return p
 
+    def sample(self, v, beta=1.0):
+        return self.sample_visible(self.sample_hidden(v, beta=beta), beta=beta)
+
     def proba_hidden(self, v, h=None, beta=1.0):
         mean = self.mean_hidden(v, beta=beta)
         if self.hidden_type == UnitType.BERNOULLI:
