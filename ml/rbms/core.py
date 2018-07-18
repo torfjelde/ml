@@ -4,11 +4,10 @@ import logging
 from enum import Enum
 from tqdm import tqdm
 
-from .. import np
-from ..functions import sigmoid, dot_batch, bernoulli_from_probas
+from ml import np
+from ml.functions import sigmoid, dot_batch, bernoulli_from_probas
 
 _log = logging.getLogger("ml")
-
 
 class UnitType(Enum):
     GAUSSIAN = 1
@@ -300,9 +299,10 @@ class RBM:
         else:
             return np.mean(hidden + visible)
 
-    def contrastive_divergence(self, v_0, k=1,
-                               persistent=False,
-                               burnin=1000,
+    def contrastive_divergence(self, v_0,
+                               k=1,
+                               h_0=None,
+                               burnin=-1,
                                beta=1.0):
         """Contrastive Divergence.
 
@@ -312,6 +312,9 @@ class RBM:
             Visible state to initialize the chain from.
         k: int
             Number of steps to use in CD-k.
+        h_0: array-like, optional
+            Visible states to initialize the chain.
+            If not specified, will sample conditioned on visisble.
 
         Returns
         -------
@@ -321,26 +324,15 @@ class RBM:
             ``h`` and ``v`` are the final states for the hidden and
             visible units, respectively.
         """
-        if persistent and self._prev is not None:
-            h_0, v_0 = self._prev
-        else:
+        if h_0 is None:
             h_0 = self.sample_hidden(v_0, beta=beta)
 
         v = v_0
         h = h_0
 
-        if persistent and self._prev is None and burnin > 0:
-            # _log.info(f"Running PCD using burnin of {burnin}")
-            for _ in range(burnin):
-                v = self.sample_visible(h, beta=beta)
-                h = self.sample_hidden(v, beta=beta)
-
         for t in range(k):
             v = self.sample_visible(h, beta=beta)
             h = self.sample_hidden(v, beta=beta)
-
-        if persistent:
-            self._prev = (h, v)
 
         return v_0, h_0, v, h
 
@@ -348,7 +340,17 @@ class RBM:
         if self.sampler_method == 'pcd':
             self._prev = None
 
-    def parallel_tempering(self, v, k=1,
+    def _init_parallel_tempering(self, v, betas=None, num_temps=10, **kwargs):
+        # 1. Initialize list of samples
+        if betas is None:
+            n = num_temps
+        else:
+            n = len(betas)
+
+        return np.tile(v, (n, 1, 1))
+
+    def parallel_tempering(self, vs, hs=None,
+                           k=1,
                            betas=None,
                            max_temp=100, num_temps=10,
                            include_negative_shift=False):
@@ -357,7 +359,7 @@ class RBM:
         # 2. Stack betas and initial samples
         # 3. Perform sampling
         # 4. Unstack
-        batch_size = v.shape[0]
+        batch_size = vs[0].shape[0]
 
         # 1. Initialize list of samples
         if betas is None:
@@ -371,10 +373,17 @@ class RBM:
 
         # 2. Perform gibbs sampling for tempered distributions
         for r in range(R):
+            v = vs[r]
+            if hs is not None:
+                h = hs[r]
+            else:
+                h = None
+
             v_0, h_0, v_k, h_k = self.contrastive_divergence(
                 v,
                 k=k,
-                beta=betas[r]
+                beta=betas[r],
+                h_0=h
             )
             res.append((v_k, h_k))
 
@@ -406,10 +415,10 @@ class RBM:
             if r == 1 and batch_size > 2 and self._warned_acceptance < 10:
                 num_acc = acc_mask[acc_mask].shape[0]
                 if num_acc >= 0.9 * batch_size:
-                    _log.warn(f"Large porition of tempered samples accepted ({num_acc} / {batch_size})")
+                    _log.warn(f"Large portion of tempered samples accepted ({num_acc} / {batch_size})")
                     self._warned_acceptance += 1
                 elif num_acc <= 0.1 * batch_size:
-                    _log.warn(f"Small porition of tempered samples accepted ({num_acc} / {batch_size})")
+                    _log.warn(f"Small portion of tempered samples accepted ({num_acc} / {batch_size})")
                     self._warned_acceptance += 1
 
         # possibly perform same for the negative shift
@@ -431,11 +440,16 @@ class RBM:
                 h = neg_res[r - 1][1] * acc_mask + neg_res[r][1] * rej_mask
                 neg_res[r] = v, h
 
+        res_v = [r[0] for r in res]
+        res_h = [r[1] for r in res]
+
         # return final state
         if include_negative_shift:
-            return neg_res[0], res[0]
+            neg_res_v = [r[0] for r in neg_res]
+            neg_res_h = [r[1] for r in neg_res]
+            return neg_res_v, neg_res_h, res_v, res_h
         else:
-            return res[0]
+            return res_v, res_h
 
     def _update(self, grad, lr=0.1):
         # in case using `cupy`, can't use `np.shape`
@@ -473,7 +487,7 @@ class RBM:
 
         return probs
 
-    def grad(self, v, **sampler_kwargs):
+    def grad(self, v, burnin=-1, persist=False, **sampler_kwargs):
         if self.sampler_method.lower() == 'cd':
             v_0, h_0, v_k, h_k = self.contrastive_divergence(
                 v,
@@ -481,23 +495,67 @@ class RBM:
             )
         elif self.sampler_method.lower() == 'pcd':
             # Persistent Contrastive Divergence
+            if self._prev is not None:
+                v_0, h_0 = self._prev
+            else:
+                # ``burnin`` specified, we perform this to initialize the chain
+                if burnin > 0:
+                    _log.info(f"Performing burnin of {burnin} steps to initialize PCD")
+                    _, _, h_0, v_0 = self.contrastive_divergence(v, k=burnin, **sampler_kwargs)
+                else:
+                    h_0 = self.sample_hidden(v, **sampler_kwargs)
+                    v_0 = v
+
             v_0, h_0, v_k, h_k = self.contrastive_divergence(
                 v,
-                persistent=True,
+                h_0=h_0,
                 **sampler_kwargs
             )
+
+            # persist
+            self._prev = (v_k, h_k)
+
         elif self.sampler_method.lower() == 'pt':
-            if sampler_kwargs.get("include_negative_shift", False):
+            h_0 = None
+            if self._prev is not None:
+                v_0, h_0 = self._prev
+            else:
+                _log.info("Initializing PT chain...")
+                v_0 = self._init_parallel_tempering(v, **sampler_kwargs)
+
+            # FIXME: make compatible with `parallel_tempering` returning
+            # all the states
+            if h_0 is None:
                 v_0, h_0, v_k, h_k = self.parallel_tempering(
-                    v,
+                    v_0,
+                    hs=h_0,
+                    include_negative_shift=True,
+                    **sampler_kwargs
+                )
+            elif sampler_kwargs.get("include_negative_shift", False):
+                v_0, h_0, v_k, h_k = self.parallel_tempering(
+                    v_0,
+                    hs=h_0,
                     **sampler_kwargs
                 )
             else:
-                v_0 = v
+                # FIXME: make compatible with `parallel_tempering` returning
+                # all the states
                 v_k, h_k = self.parallel_tempering(
-                    v,
+                    v_0,
+                    hs=h_0,
                     **sampler_kwargs
                 )
+
+            if persist:
+                self._prev = (v_k, h_k)
+
+            # take the first tempered distribution, i.e. the one corresponding
+            # the target distribution
+            v_0 = v_0[0]
+            h_0 = h_0[0]
+            v_k = v_k[0]
+            h_k = v_k[0]
         else:
             raise ValueError(f"{self.sampler_method} is not supported")
         
