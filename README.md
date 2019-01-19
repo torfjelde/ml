@@ -28,15 +28,17 @@ for i in range(visible_size):
 
 cov = np.matmul(cov, cov)
 
-data = np.random.multivariate_normal(means, np.matmul(cov, cov) , size=100)
+n = 10000
+data = np.random.multivariate_normal(means, np.matmul(cov, cov) , size=n)
 
 # train / test split
-train_data, test_data = data[:80], data[80:]
+split_idx = np.int(np.floor(n * 0.8))
+train_data, test_data = data[:split_idx], data[split_idx:]
 
 # training parameters
 LR = 0.001
 BATCH_SIZE = 128
-NUM_EPOCHS = 10
+NUM_EPOCHS = 100
 K = 1
 V_SIGMA = 0.1
 
@@ -59,15 +61,47 @@ stats = rbm.fit(
 # visualize
 import matplotlib.pyplot as plt
 
-fig = figure()
+fig = plt.figure()
 plt.plot(stats['nll_train'])
 plt.plot(stats['nll_test'])
 plt.show()
+```
 
-# sample
-samples_v, samples_h = gibbs_sample_rbm(rbm, 100000, data[123], burnin=10000)
+To visualize the distribution of the samples vs. distribution of the RBM, you can run the code below.
 
+```python
 # visualize RBM samples vs. true samples
+def sample_rbm(rbm, n, initial, burnin=1000, sample_ever=10, sampler='cd', sample_every=10, **sampler_kwargs):
+    v = initial
+    
+    for i in range(burnin):
+        if sampler == 'pt':
+            v, h = rbm.parallel_tempering(v, **sampler_kwargs)
+        else:
+            _, _, v, h = rbm.contrastive_divergence(v, **sampler_kwargs)
+
+    if sampler == 'pt':
+        visibles = np.zeros((n, v[0].shape[1]))
+        hiddens = np.zeros((n, h[0].shape[1]))
+    else:
+        visibles = np.zeros((n, v.shape[1]))
+        hiddens = np.zeros((n, h.shape[1]))
+    for i in range(n * sample_every):
+        if sampler == 'pt':
+            v, h = rbm.parallel_tempering(v, **sampler_kwargs)
+        else:
+            _, _, v, h = rbm.contrastive_divergence(v, **sampler_kwargs)
+        
+        if i % sample_every == 0:
+            if sampler == 'pt':
+                visibles[i // sample_every] = v[0]
+                hiddens[i // sample_every] = h[0]
+            else:
+                visibles[i // sample_every] = v
+                hiddens[i // sample_every] = h
+        
+    return visibles, hiddens
+
 def plot_gaussian_mixtures(data, samples_v, title=None, include_means=False):
     fig, axes = plt.subplots(data.shape[1], 1, figsize=(15, 16), sharex=True, sharey=True)
     
@@ -84,8 +118,11 @@ def plot_gaussian_mixtures(data, samples_v, title=None, include_means=False):
         axes[j].set_xlim(-5, 15)
         
     return fig, axes
+    
+# sample
+samples_v, samples_h = sample_rbm(rbm, 1000, np.reshape(data[0], (1, -1)), burnin=10000)
 
-fig = figure()
+fig = plt.figure()
 plot_gaussian_mixtures(data, samples_v, title=f"CD-k with $k={K}$")
 plt.show()
 ```
