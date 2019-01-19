@@ -88,5 +88,4 @@ def plot_gaussian_mixtures(data, samples_v, title=None, include_means=False):
 fig = figure()
 plot_gaussian_mixtures(data, samples_v, title=f"CD-k with $k={K}$")
 plt.show()
-
 ```
